@@ -22,6 +22,8 @@ func main() {
 
 	logger.Info("Launching the cache system", "memoryCacheSize", cfg.DatabaseDSN)
 
+	memoryStorage := multi_tier_caching.NewCacheLayer(cfg.UseMemcached, cfg.MemcachedADDR)
+
 	dbStorage, err := storage.NewDatabaseStorage(cfg.DatabaseDSN)
 	if err != nil {
 		logger.Error("Failed to connect to the database", "error", err)
@@ -37,7 +39,7 @@ func main() {
 
 	cache := multi_tier_caching.NewMultiTierCache(
 		[]multi_tier_caching.CacheLayer{
-			multi_tier_caching.NewMemoryCache(),
+			memoryStorage,
 			multi_tier_caching.NewRedisCache(redisStorage),
 		},
 		multi_tier_caching.NewDatabaseCache(dbStorage),
