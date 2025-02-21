@@ -10,8 +10,6 @@ import (
 
 type Config struct {
 	MemoryCacheSize int
-	UseMemcached    bool
-	MemcachedADDR   string
 	RedisAddr       string
 	RedisPassword   string
 	DatabaseDSN     string
@@ -22,15 +20,8 @@ func LoadConfig() *Config {
 	// Load environment variables from .env if it exists
 	_ = godotenv.Load()
 
-	memoryCacheSize, err := strconv.Atoi(getEnv("MEMORY_CACHE_SIZE", "1000"))
-	if err != nil {
-		log.Fatalf("Error parsing MEMORY_CACHE_SIZE: %v", err)
-	}
-
 	return &Config{
-		MemoryCacheSize: memoryCacheSize,
-		UseMemcached:    getEnvBool("USE_MEMCACHED", false),
-		MemcachedADDR:   getEnv("MEMCACHED_ADDR", "localhost:11211"),
+		MemoryCacheSize: getEnvInt("MEMORY_CACHE_SIZE", 100),
 		RedisAddr:       getEnv("REDIS_ADDR", "localhost:6379"),
 		RedisPassword:   getEnv("REDIS_PASSWORD", ""),
 		DatabaseDSN:     getEnv("DATABASE_DSN", "postgres://user:password@localhost:5432/mydb"),
@@ -42,6 +33,18 @@ func LoadConfig() *Config {
 func getEnv(key, defaultValue string) string {
 	if value, exists := os.LookupEnv(key); exists {
 		return value
+	}
+	return defaultValue
+}
+
+// Helper function to get int value from ENV with default value
+func getEnvInt(key string, defaultValue int) int {
+	if value, exists := os.LookupEnv(key); exists {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			log.Fatalf("Error parsing %s: %v", key, err)
+		}
+		return parsed
 	}
 	return defaultValue
 }

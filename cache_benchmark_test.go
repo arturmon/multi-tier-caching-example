@@ -15,11 +15,15 @@ import (
 	"github.com/arturmon/multi-tier-caching/storage"
 )
 
-const maxRecords = 1000 // Number of records
+const maxRecords = 10000 // Number of records
 const maxRepeats = 1000
+const memoryCacheSize = 100
 
-func getRepeats(maxRepeats int) int {
-	return rand.Intn(maxRepeats) + 1
+// Hot to Cold
+var FrequencyThresholds = []int{50, 20, 10}
+
+func getRepeats(Repeats int) int {
+	return rand.Intn(Repeats) + 1
 }
 
 func randomString(n int) string {
@@ -31,11 +35,17 @@ func randomString(n int) string {
 	return string(b)
 }
 
+func randomDelay(min, max time.Duration) time.Duration {
+	// Random delay between min and max duration
+	return time.Duration(rand.Int63n(int64(max-min))) + min
+}
+
 func setKey(cache *multi_tier_caching.MultiTierCache, key, value string, wg *sync.WaitGroup, mu *sync.Mutex, storedKeys map[string]string, setCount *int, totalSetDuration *time.Duration, totalRecords *int, totalRepeats *int, accessCounts map[string]int) {
 	defer wg.Done()
 	repeats := getRepeats(maxRepeats)
 
 	for j := 0; j < repeats; j++ { // Record with repeat for one key
+		time.Sleep(randomDelay(50*time.Millisecond, 200*time.Millisecond))
 		start := time.Now()
 		err := cache.Set(context.Background(), key, value)
 		duration := time.Since(start)
@@ -63,6 +73,7 @@ func getKey(cache *multi_tier_caching.MultiTierCache, key, expectedValue string,
 	repeats := getRepeats(maxRepeats)
 
 	for j := 0; j < repeats; j++ { // Read with repeat for one key
+		time.Sleep(randomDelay(50*time.Millisecond, 200*time.Millisecond))
 		start := time.Now()
 		val, err := cache.Get(context.Background(), key)
 		duration := time.Since(start)
@@ -99,6 +110,8 @@ func TestMultiTierCache(t *testing.T) {
 
 	cfg := config.LoadConfig()
 
+	cfg.MemoryCacheSize = memoryCacheSize
+
 	fmt.Println("===== CONFIGURATION =====")
 	fmt.Printf("Log Level: %s\n", cfg.LogLevel)
 	fmt.Printf("Memory Cache Size: %d\n", cfg.MemoryCacheSize)
@@ -123,12 +136,18 @@ func TestMultiTierCache(t *testing.T) {
 	fmt.Println("Connected to Redis")
 	fmt.Println("=========================")
 
+	memoryStorage, err := storage.NewRistrettoCache(int64(cfg.MemoryCacheSize))
+	if err != nil {
+		t.Fatalf("Failed to create Memory stoage: %v", err)
+	}
+
 	cache := multi_tier_caching.NewMultiTierCache(
 		[]multi_tier_caching.CacheLayer{
-			multi_tier_caching.NewMemoryCache(),
-			multi_tier_caching.NewRedisCache(redisStorage),
+			memoryStorage, // Hot layer
+			multi_tier_caching.NewRedisCache(redisStorage), // Warm layer
 		},
-		multi_tier_caching.NewDatabaseCache(dbStorage),
+		multi_tier_caching.NewDatabaseCache(dbStorage), // Cold layer
+		FrequencyThresholds,                            // Frequency thresholds for layers
 	)
 
 	var (
@@ -146,7 +165,7 @@ func TestMultiTierCache(t *testing.T) {
 		lastAccessTimes  = make(map[string]time.Time)
 		accessCounts     = make(map[string]int)
 	)
-
+	time.Sleep(5 * time.Second)
 	// Start of time measurement
 	startTime := time.Now()
 
@@ -157,7 +176,6 @@ func TestMultiTierCache(t *testing.T) {
 
 		// We launch a separate goroutine for writing and reading
 		wg.Add(2)
-
 		go setKey(cache, key, value, &wg, &mu, storedKeys, &setCount, &totalSetDuration, &totalRecords, &totalRepeats, accessCounts)
 		go getKey(cache, key, value, &wg, &mu, &getCount, &missCount, &totalGetDuration, firstAccessTimes, lastAccessTimes, accessCounts)
 	}
